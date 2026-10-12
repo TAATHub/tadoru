@@ -2,8 +2,19 @@
 
 Miller カラム形式でディレクトリを辿り、スクロール可能なプレビューを表示するターミナルファイラー。
 
+## インストール
+
+Go 1.26 以降が必要（古い Go でも GOTOOLCHAIN により自動で取得される）。リポジトリは private なので、git が GitHub に認証できる状態にしておく。
+
 ```sh
-go build -o tadoru . && ./tadoru [-theme NAME] [dir]
+gh auth setup-git
+GOPRIVATE=github.com/TAATHub go install github.com/TAATHub/tadoru@latest
+```
+
+バイナリは `$(go env GOPATH)/bin`（通常 `~/go/bin`）に入るので、PATH に含めておく。更新も同じコマンドで行う。
+
+```sh
+tadoru [-theme NAME] [dir]
 ```
 
 ## キー操作
