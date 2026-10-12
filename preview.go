@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/hex"
 	"fmt"
 	"image"
 	"image/color"
@@ -11,6 +10,7 @@ import (
 	_ "image/png"
 	"io"
 	"math"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -22,6 +22,7 @@ import (
 	"github.com/alecthomas/chroma/v2/lexers"
 	chromastyles "github.com/alecthomas/chroma/v2/styles"
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	_ "golang.org/x/image/bmp"
 	xdraw "golang.org/x/image/draw"
@@ -32,7 +33,6 @@ import (
 const (
 	maxPreviewBytes   = 1 << 20
 	maxHighlightBytes = 256 << 10
-	maxHexBytes       = 64 << 10
 	// Decoded images are downscaled once on load so that re-fitting on
 	// every terminal resize stays cheap.
 	maxImageSide   = 2048
@@ -61,6 +61,7 @@ type previewContent struct {
 
 	text    []string
 	raw     string
+	mime    string
 	entries []entry
 	img     image.Image
 	note    string
@@ -94,7 +95,11 @@ func (p *previewContent) lines(w, h int) []string {
 			out = numberLines(p.text, w)
 		}
 	case pvBinary:
-		out = p.text
+		out = infoCard([]string{
+			lipgloss.NewStyle().Foreground(colFg).Bold(true).Render("Binary file"),
+			dimStyle.Render(p.mime),
+			dimStyle.Render(humanSize(p.size)),
+		}, w, h)
 	case pvImage:
 		out = renderImage(p.img, w, h)
 	case pvEmpty:
@@ -174,14 +179,7 @@ func buildPreview(path string) *previewContent {
 
 	if isBinary(buf) {
 		p.kind = pvBinary
-		n := min(len(buf), maxHexBytes)
-		p.text = strings.Split(strings.TrimRight(hex.Dump(buf[:n]), "\n"), "\n")
-		if p.note == "" {
-			p.note = "binary"
-		}
-		if st.Size() > int64(n) {
-			p.note += fmt.Sprintf(", first %s", humanSize(int64(n)))
-		}
+		p.mime = strings.SplitN(http.DetectContentType(buf), ";", 2)[0]
 		return p
 	}
 
@@ -207,6 +205,15 @@ func isImageExt(path string) bool {
 		return true
 	}
 	return false
+}
+
+// infoCard centres a few short lines in a w×h box.
+func infoCard(lines []string, w, h int) []string {
+	out := make([]string, max(0, (h-len(lines))/2))
+	for _, l := range lines {
+		out = append(out, strings.Repeat(" ", max(0, (w-ansi.StringWidth(l))/2))+l)
+	}
+	return out
 }
 
 func isMarkdownExt(path string) bool {

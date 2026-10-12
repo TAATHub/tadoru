@@ -35,7 +35,7 @@ func (s selection) empty() bool {
 }
 
 func selectable(p *previewContent) bool {
-	return p != nil && (p.kind == pvText || p.kind == pvMarkdown || p.kind == pvBinary)
+	return p != nil && (p.kind == pvText || p.kind == pvMarkdown)
 }
 
 // colsFor returns the selected display columns [c0, c1) of a line, with
