@@ -100,7 +100,7 @@ func (p *previewContent) lines(w, h int) []string {
 	case pvEmpty:
 		out = []string{dimStyle.Render("(" + p.note + ")")}
 	case pvError:
-		out = []string{errStyle.Render(p.err.Error())}
+		out = []string{errStyle.Render(safeText(p.err.Error()))}
 	}
 	p.cacheW, p.cacheH, p.cacheLines, p.cacheValid = w, h, out, true
 	return out

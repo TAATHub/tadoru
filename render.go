@@ -34,7 +34,7 @@ func box(title, footer string, body []string, w, h int, active bool) string {
 	sb.WriteString(bs.Render("╭"))
 	used := 0
 	if title != "" && w > 4 {
-		t := ansi.Truncate(title, w-3, "…")
+		t := ansi.Truncate(safeText(title), w-3, "…")
 		sb.WriteString(bs.Render("─ ") + ts.Render(t) + bs.Render(" "))
 		used = ansi.StringWidth(t) + 3
 	}
@@ -52,7 +52,7 @@ func box(title, footer string, body []string, w, h int, active bool) string {
 
 	f, fw := "", 0
 	if footer != "" && w > 4 {
-		f = ansi.Truncate(footer, w-3, "…")
+		f = ansi.Truncate(safeText(footer), w-3, "…")
 		fw = ansi.StringWidth(f) + 3
 	}
 	sb.WriteString(bs.Render("╰" + strings.Repeat("─", max(0, w-fw))))
@@ -64,15 +64,27 @@ func box(title, footer string, body []string, w, h int, active bool) string {
 }
 
 func entryStyle(e entry) (lipgloss.Style, string) {
+	name := safeText(e.name)
 	switch {
 	case e.isDir:
-		return dirStyle, e.name + "/"
+		return dirStyle, name + "/"
 	case e.isLink:
-		return linkStyle, e.name
+		return linkStyle, name
 	case e.isExec():
-		return execStyle, e.name
+		return execStyle, name
 	}
-	return fileStyle, e.name
+	return fileStyle, name
+}
+
+// safeText replaces control characters in names, paths and error messages,
+// which come from the filesystem and could otherwise drive the terminal.
+func safeText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) {
+			return '?'
+		}
+		return r
+	}, s)
 }
 
 func renderEntryLine(e entry, w int, selected, active, showSize bool) string {

@@ -543,7 +543,7 @@ func (m *Model) View() string {
 	var curBody []string
 	switch {
 	case m.err != nil:
-		curBody = []string{errStyle.Render(m.err.Error())}
+		curBody = []string{errStyle.Render(safeText(m.err.Error()))}
 	case len(m.entries) == 0 && m.filter != "":
 		curBody = []string{dimStyle.Render("(no match)")}
 	case len(m.entries) == 0:
@@ -593,14 +593,14 @@ func (m *Model) View() string {
 }
 
 func (m *Model) renderHeader() string {
-	left := headerStyle.Render("tadoru") + " " + pathStyle.Render(abbrevHome(m.cwd))
+	left := headerStyle.Render("tadoru") + " " + pathStyle.Render(safeText(abbrevHome(m.cwd)))
 	return ansi.Truncate(left, m.width, "")
 }
 
 func (m *Model) renderFooter() string {
 	left := ""
 	if m.searching {
-		left = " /" + m.filter + "▏"
+		left = " /" + safeText(m.filter) + "▏"
 		right := "enter confirm  esc clear "
 		gap := max(1, m.width-ansi.StringWidth(left)-ansi.StringWidth(right))
 		return pathStyle.Render(left) + dimStyle.Render(strings.Repeat(" ", gap)+right)
@@ -611,7 +611,7 @@ func (m *Model) renderFooter() string {
 	var right string
 	switch {
 	case m.status != "":
-		right = m.status
+		right = safeText(m.status)
 	default:
 		right = "/ search  o open  O finder  q quit"
 	}
