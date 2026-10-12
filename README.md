@@ -1,0 +1,32 @@
+# tadoru
+
+Miller カラム形式でディレクトリを辿り、スクロール可能なプレビューを表示するターミナルファイラー。
+
+```sh
+go build -o tadoru . && ./tadoru [-theme NAME] [dir]
+```
+
+## キー操作
+
+| キー | 動作 |
+| --- | --- |
+| `↑` / `↓` | カーソル移動 |
+| `←` / `→` | 親ディレクトリへ / ディレクトリの中へ |
+| `/` | 名前で絞り込み（`Enter` 確定 / `Esc` 解除） |
+| `o` / `O` | 既定アプリで開く / Finder で表示 |
+| `q` | 終了 |
+
+マウスホイールはカーソル位置のカラムに効く（プレビューはホイールでスクロールする）。クリックで選択し、プレビューがディレクトリのときはクリックした項目へ移動する。テキスト・Markdown・hex のプレビューはドラッグで範囲選択でき、離すとクリップボードにコピーされる（`pbcopy`、なければ OSC 52）。ドラッグせずに URL（`http(s)://`）をクリックするとブラウザで開く。隠しファイルは表示しない。
+
+## プレビュー
+
+- テキスト: chroma によるシンタックスハイライト（先頭 1 MiB、ハイライトは 256 KiB まで）
+- Markdown: glamour で整形表示（見出し・表・コードブロック等）
+- 画像: png / jpeg / gif / webp / bmp / tiff。Kitty graphics 対応端末（Ghostty / kitty / WezTerm）では Unicode プレースホルダー方式で高解像度表示し、それ以外は半ブロック文字 + truecolor で描画する。`TADORU_IMAGE=kitty|blocks` で強制できる
+- バイナリ: 先頭 64 KiB の hex dump
+
+## テーマ
+
+`-theme NAME` か `TADORU_THEME` で指定する。UI の配色・コードのハイライト・Markdown の配色がまとめて切り替わる。未指定なら Ghostty の `theme` 設定に合わせ、該当がなければ `catppuccin-mocha`。
+
+`catppuccin-mocha` / `dracula` / `gruvbox` / `monokai` / `nord` / `onedark` / `solarized-dark` / `tokyonight`（`Catppuccin Mocha` のような表記揺れも可）
