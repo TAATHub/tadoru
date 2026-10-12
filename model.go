@@ -277,7 +277,7 @@ func (m *Model) ensureKitty() tea.Cmd {
 		return nil
 	}
 	l := m.layout()
-	key := kittyKey(m.preview.path, l.vw, l.h)
+	key := kittyKey(m.preview, l.vw, l.h)
 	if (m.kitty != nil && m.kitty.key == key) || m.kittyWant == key {
 		return nil
 	}
@@ -305,7 +305,9 @@ func (m *Model) previewLines() []string {
 	}
 	l := m.layout()
 	if m.usesKitty() {
-		if m.kitty != nil && m.kitty.key == kittyKey(m.preview.path, l.vw, l.h) {
+		// While a newer version of the same image is being encoded, keep
+		// showing the one already on the terminal instead of flashing.
+		if m.kitty != nil && strings.HasPrefix(m.kitty.key, m.preview.path+"|") {
 			return m.kitty.placeholderLines(l.vw)
 		}
 		return []string{dimStyle.Render("Loading…")}

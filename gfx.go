@@ -114,8 +114,10 @@ type kittyImage struct {
 
 type kittyReadyMsg struct{ img *kittyImage }
 
-func kittyKey(path string, w, h int) string {
-	return fmt.Sprintf("%s|%d|%d", path, w, h)
+// kittyKey identifies a transmission; it includes the file version so an
+// edited image is re-sent instead of reusing the one already on the terminal.
+func kittyKey(p *previewContent, w, h int) string {
+	return fmt.Sprintf("%s|%d|%d|%d|%d", p.path, p.modTime.UnixNano(), p.size, w, h)
 }
 
 // encodeKitty fits img into a w×h cell box and returns the PNG transmission
