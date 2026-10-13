@@ -534,13 +534,13 @@ func (m *Model) handleKey(key string) tea.Cmd {
 		}
 	case "/":
 		m.searching = true
-	case "down":
+	case "down", "j":
 		return m.moveTo(m.cursor + 1)
-	case "up":
+	case "up", "k":
 		return m.moveTo(m.cursor - 1)
-	case "left":
+	case "left", "h":
 		return m.back()
-	case "right":
+	case "right", "l":
 		return m.enter()
 	}
 	return nil
