@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"image"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,9 +66,19 @@ type Model struct {
 
 	imgMode      imageMode
 	cellW, cellH float64
-	kitty        *kittyImage
-	kittyWant    string
-	kittySeq     uint32
+	// kitty is the set of images on the terminal, sent for kittyOn; plan is
+	// the latest placement, whose ids the preview lines already use while
+	// its payloads are being encoded for kittyWant.
+	kitty     []*kittyImage
+	kittyOn   string
+	kittyWant string
+	plan      []*kittyImage
+	planKey   string
+	kittySeq  uint32
+
+	// mdSource shows Markdown as its source instead of rendered; it sticks
+	// across files so a run of documents can be read the same way.
+	mdSource bool
 
 	status string
 }
@@ -267,35 +278,90 @@ func (m *Model) storeCache(p *previewContent) {
 }
 
 func (m *Model) usesKitty() bool {
-	return m.imgMode == imageKitty && m.preview != nil && m.preview.kind == pvImage
+	if m.imgMode != imageKitty || m.preview == nil {
+		return false
+	}
+	return m.preview.kind == pvImage || (m.preview.kind == pvMarkdown && !m.mdSource && countImages(m.preview.blocks) > 0)
 }
 
-// ensureKitty starts encoding the current image for the current box size
-// unless that exact transmission is already on the terminal.
+// ensureKitty plans and starts encoding the current preview's images for the
+// current box size unless that exact transmission is already on the terminal.
 func (m *Model) ensureKitty() tea.Cmd {
 	if !m.usesKitty() {
 		return nil
 	}
 	l := m.layout()
 	key := kittyKey(m.preview, l.vw, l.h)
-	if (m.kitty != nil && m.kitty.key == key) || m.kittyWant == key {
+	if m.kittyOn == key || m.kittyWant == key {
 		return nil
 	}
 	m.kittyWant = key
-	m.kittySeq++
-	// The id lives in the 24-bit foreground colour; mixing in the pid keeps
-	// several instances in one terminal from clobbering each other.
-	id := uint32(os.Getpid()&0xffff)<<8 | (m.kittySeq%255 + 1)
-	img, w, h, cw, ch := m.preview.img, l.vw, l.h, m.cellW, m.cellH
+	m.plan, m.planKey = nil, key
+	nextID := func() uint32 {
+		m.kittySeq++
+		// The id lives in the 24-bit foreground colour; mixing in the pid
+		// keeps several instances in one terminal from clobbering each other.
+		return uint32(os.Getpid()&0xffff)<<8 | (m.kittySeq%255 + 1)
+	}
+	if m.preview.kind == pvImage {
+		m.plan = append(m.plan, planKitty(m.preview.img, key, nextID(), l.vw, l.h, m.cellW, m.cellH, true))
+	} else {
+		w, h := mdImageBox(l.vw, l.h)
+		for _, b := range m.preview.blocks {
+			if b.kind == mdImage {
+				m.plan = append(m.plan, planKitty(b.img, key, nextID(), w, h, m.cellW, m.cellH, false))
+			}
+		}
+	}
+	jobs := make([]kittyImage, len(m.plan))
+	for i, k := range m.plan {
+		jobs[i] = *k
+	}
 	return func() tea.Msg {
-		return kittyReadyMsg{encodeKitty(img, key, id, w, h, cw, ch)}
+		msg := kittyReadyMsg{key: key}
+		for _, j := range jobs {
+			if k := encodeKitty(j); k != nil {
+				msg.imgs = append(msg.imgs, k)
+			}
+		}
+		return msg
 	}
 }
 
 func (m *Model) clearKitty() {
-	if m.kitty != nil {
-		os.Stdout.WriteString(kittyDelete(m.kitty.id))
-		m.kitty = nil
+	for _, k := range m.kitty {
+		os.Stdout.WriteString(kittyDelete(k.id))
+	}
+	m.kitty, m.kittyOn = nil, ""
+}
+
+// markdownImages lays out embedded images as Kitty placeholders from the
+// current plan, or as half blocks when Kitty graphics are unavailable.
+func (m *Model) markdownImages() (string, imageBoxFunc) {
+	if m.imgMode != imageKitty {
+		return "", blockImageLines(m.cellW, m.cellH)
+	}
+	l := m.layout()
+	plan, tag := m.plan, ""
+	if m.planKey != kittyKey(m.preview, l.vw, l.h) || len(plan) == 0 {
+		plan = nil
+	} else {
+		// Ids change when the same document is planned again.
+		tag = fmt.Sprintf("%s#%d", m.planKey, plan[0].id)
+	}
+	byBlock := map[int]*kittyImage{}
+	n := 0
+	for i, b := range m.preview.blocks {
+		if b.kind == mdImage && n < len(plan) {
+			byBlock[i] = plan[n]
+			n++
+		}
+	}
+	return tag, func(i int, _ image.Image, _, _ int) []string {
+		if k := byBlock[i]; k != nil {
+			return k.placeholderLines(k.cols)
+		}
+		return nil
 	}
 }
 
@@ -304,15 +370,26 @@ func (m *Model) previewLines() []string {
 		return nil
 	}
 	l := m.layout()
-	if m.usesKitty() {
+	switch {
+	case m.usesKitty() && m.preview.kind == pvImage:
 		// While a newer version of the same image is being encoded, keep
 		// showing the one already on the terminal instead of flashing.
-		if m.kitty != nil && strings.HasPrefix(m.kitty.key, m.preview.path+"|") {
-			return m.kitty.placeholderLines(l.vw)
+		if len(m.kitty) == 1 && strings.HasPrefix(m.kittyOn, m.preview.path+"|") {
+			return m.kitty[0].placeholderLines(l.vw)
 		}
 		return []string{dimStyle.Render("Loading…")}
+	case m.showsSource():
+		return m.preview.lines(l.vw, l.h, sourceTag, nil)
+	case m.preview.kind == pvMarkdown && len(m.preview.blocks) > 0:
+		tag, fn := m.markdownImages()
+		return m.preview.lines(l.vw, l.h, tag, fn)
 	}
-	return m.preview.lines(l.vw, l.h)
+	return m.preview.lines(l.vw, l.h, "", nil)
+}
+
+// showsSource reports whether the preview is line-numbered source text.
+func (m *Model) showsSource() bool {
+	return m.preview != nil && (m.preview.kind == pvText || (m.preview.kind == pvMarkdown && m.mdSource))
 }
 
 func (m *Model) scrollPreview(delta int) {
@@ -330,15 +407,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.ensureKitty()
 
 	case kittyReadyMsg:
-		if msg.img == nil || msg.img.key != m.kittyWant {
+		if msg.key != m.kittyWant {
 			return m, nil
 		}
 		m.kittyWant = ""
 		m.clearKitty()
 		// os.File serialises writes, so this cannot interleave with a
-		// renderer flush; the payload lands before the placeholders do.
-		os.Stdout.WriteString(msg.img.payload)
-		m.kitty = msg.img
+		// renderer flush.
+		for _, k := range msg.imgs {
+			os.Stdout.WriteString(k.payload)
+		}
+		m.kitty, m.kittyOn = msg.imgs, msg.key
 		return m, nil
 
 	case previewTickMsg:
@@ -430,6 +509,21 @@ func (m *Model) handleKey(key string) tea.Cmd {
 		return tea.Quit
 	case "o":
 		m.openSelected()
+	case "c":
+		if sel := m.selected(); sel != nil {
+			if err := copyToClipboard(sel.path); err != nil {
+				m.status = "copy: " + err.Error()
+			} else {
+				m.status = "Copied " + abbrevHome(sel.path)
+			}
+		}
+	case "r":
+		if m.preview != nil && m.preview.kind == pvMarkdown {
+			m.mdSource = !m.mdSource
+			m.pvOffset = 0
+			m.sel = selection{}
+			return m.ensureKitty()
+		}
 	case "O":
 		if sel := m.selected(); sel != nil {
 			if err := revealInFileManager(sel.path); err != nil {
@@ -615,7 +709,14 @@ func (m *Model) renderFooter() string {
 	case m.status != "":
 		right = safeText(m.status)
 	default:
-		right = "/ search  o open  O finder  q quit"
+		right = "/ search  c copy path  o open  O finder  q quit"
+		if m.preview != nil && m.preview.kind == pvMarkdown {
+			mode := "source"
+			if m.mdSource {
+				mode = "rendered"
+			}
+			right = "r " + mode + "  " + right
+		}
 	}
 	right = ansi.Truncate(right, max(0, m.width-ansi.StringWidth(left)-2), "…") + " "
 	gap := max(1, m.width-ansi.StringWidth(left)-ansi.StringWidth(right))

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"image"
 	"image/png"
-	"math"
 	"os"
 	"regexp"
 	"strconv"
@@ -110,9 +109,15 @@ type kittyImage struct {
 	id         uint32
 	cols, rows int
 	payload    string
+
+	img   image.Image
+	scale float64
 }
 
-type kittyReadyMsg struct{ img *kittyImage }
+type kittyReadyMsg struct {
+	key  string
+	imgs []*kittyImage
+}
 
 // kittyKey identifies a transmission; it includes the file version so an
 // edited image is re-sent instead of reusing the one already on the terminal.
@@ -120,15 +125,18 @@ func kittyKey(p *previewContent, w, h int) string {
 	return fmt.Sprintf("%s|%d|%d|%d|%d", p.path, p.modTime.UnixNano(), p.size, w, h)
 }
 
-// encodeKitty fits img into a w×h cell box and returns the PNG transmission
-// for a virtual placement of cols×rows cells.
-func encodeKitty(img image.Image, key string, id uint32, w, h int, cw, ch float64) *kittyImage {
+// planKitty assigns an id and a cell box to img; the payload is encoded later.
+func planKitty(img image.Image, key string, id uint32, w, h int, cw, ch float64, upscale bool) *kittyImage {
+	b := img.Bounds()
+	cols, rows, scale := fitCells(float64(b.Dx()), float64(b.Dy()), w, h, cw, ch, upscale)
+	return &kittyImage{key: key, id: id, cols: cols, rows: rows, img: img, scale: scale}
+}
+
+// encodeKitty returns the PNG transmission for k's virtual placement.
+func encodeKitty(k kittyImage) *kittyImage {
+	img, scale := k.img, k.scale
 	b := img.Bounds()
 	iw, ih := float64(b.Dx()), float64(b.Dy())
-	scale := math.Min(float64(w)*cw/iw, float64(h)*ch/ih)
-	cols := clamp(int(math.Ceil(iw*scale/cw)), 1, w)
-	rows := clamp(int(math.Ceil(ih*scale/ch)), 1, h)
-
 	src := img
 	if scale < 1 {
 		src = scaleToFit(img, max(1, int(iw*scale)), max(1, int(ih*scale)))
@@ -149,12 +157,13 @@ func encodeKitty(img image.Image, key string, id uint32, w, h int, cw, ch float6
 			more = 1
 		}
 		if i == 0 {
-			fmt.Fprintf(&sb, "\x1b_Ga=T,U=1,f=100,t=d,q=2,i=%d,c=%d,r=%d,m=%d;%s\x1b\\", id, cols, rows, more, data[i:end])
+			fmt.Fprintf(&sb, "\x1b_Ga=T,U=1,f=100,t=d,q=2,i=%d,c=%d,r=%d,m=%d;%s\x1b\\", k.id, k.cols, k.rows, more, data[i:end])
 		} else {
 			fmt.Fprintf(&sb, "\x1b_Gm=%d;%s\x1b\\", more, data[i:end])
 		}
 	}
-	return &kittyImage{key: key, id: id, cols: cols, rows: rows, payload: sb.String()}
+	k.img, k.payload = nil, sb.String()
+	return &k
 }
 
 func kittyDelete(id uint32) string {

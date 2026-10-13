@@ -56,6 +56,10 @@ func (s selection) colsFor(line int) (int, int, bool) {
 }
 
 func highlightSelection(line string, c0, c1 int) string {
+	// Restyling a placeholder's foreground would change its image id.
+	if isImageLine(line) {
+		return line
+	}
 	w := ansi.StringWidth(line)
 	if c1 < 0 || c1 > w {
 		c1 = w
@@ -81,12 +85,15 @@ func (m *Model) selectedText(display []string, w int) string {
 	a, b := m.sel.bounds()
 	gutter := 0
 	source := func(i int) string { return ansi.Strip(display[i]) }
-	if m.preview.kind == pvText {
+	if m.showsSource() {
 		gutter = textGutter(m.preview)
 		source = func(i int) string { return ansi.Strip(m.preview.text[i]) }
 	}
 	var out []string
 	for i := a.line; i <= b.line && i < len(display); i++ {
+		if isImageLine(display[i]) {
+			continue
+		}
 		c0, c1, _ := m.sel.colsFor(i)
 		c0 = max(0, c0-gutter)
 		// Reaching the right edge means the rest of a truncated line too.
@@ -156,4 +163,8 @@ func (m *Model) finishSelection() {
 		return
 	}
 	m.status = fmt.Sprintf("Copied %d chars", utf8.RuneCountInString(text))
+}
+
+func isImageLine(line string) bool {
+	return strings.ContainsRune(line, '\U0010EEEE')
 }

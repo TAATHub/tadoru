@@ -64,16 +64,23 @@ type previewContent struct {
 	mime    string
 	entries []entry
 	img     image.Image
+	blocks  []mdBlock
 	note    string
 	err     error
 
 	cacheW, cacheH int
+	cacheTag       string
 	cacheLines     []string
 	cacheValid     bool
 }
 
-func (p *previewContent) lines(w, h int) []string {
-	if p.cacheValid && p.cacheW == w && p.cacheH == h {
+// sourceTag asks lines for a Markdown file's highlighted source.
+const sourceTag = "source"
+
+// lines renders the preview for a w×h box. tag names whatever imgFn depends
+// on, so a new Kitty placement plan invalidates the cached lines.
+func (p *previewContent) lines(w, h int, tag string, imgFn imageBoxFunc) []string {
+	if p.cacheValid && p.cacheW == w && p.cacheH == h && p.cacheTag == tag {
 		return p.cacheLines
 	}
 	var out []string
@@ -90,8 +97,12 @@ func (p *previewContent) lines(w, h int) []string {
 	case pvText:
 		out = numberLines(p.text, w)
 	case pvMarkdown:
+		if tag == sourceTag {
+			out = numberLines(p.text, w)
+			break
+		}
 		var err error
-		if out, err = renderMarkdown(p.raw, w); err != nil {
+		if out, err = renderMarkdownDoc(p.raw, p.blocks, w, h, imgFn); err != nil {
 			out = numberLines(p.text, w)
 		}
 	case pvBinary:
@@ -107,7 +118,7 @@ func (p *previewContent) lines(w, h int) []string {
 	case pvError:
 		out = []string{errStyle.Render(safeText(p.err.Error()))}
 	}
-	p.cacheW, p.cacheH, p.cacheLines, p.cacheValid = w, h, out, true
+	p.cacheW, p.cacheH, p.cacheTag, p.cacheLines, p.cacheValid = w, h, tag, out, true
 	return out
 }
 
@@ -186,7 +197,8 @@ func buildPreview(path string) *previewContent {
 	p.kind = pvText
 	text := sanitize(string(buf))
 	if isMarkdownExt(path) {
-		p.kind, p.raw = pvMarkdown, text
+		p.kind = pvMarkdown
+		p.raw, p.blocks = extractBlocks(path, text)
 	}
 	if len(buf) <= maxHighlightBytes {
 		p.text = highlight(path, text)
