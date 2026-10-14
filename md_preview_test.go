@@ -57,6 +57,31 @@ func TestExtractBlocks(t *testing.T) {
 	}
 }
 
+func TestExtractHTMLImages(t *testing.T) {
+	dir := t.TempDir()
+	writePNG(t, filepath.Join(dir, "a.png"), 40, 20)
+	cases := []struct {
+		src  string
+		want int
+	}{
+		{"<img src=\"a.png\"> <img src='a.png'>", 2},
+		{"<IMG SRC=a.png />", 1},
+		{"<p align=\"center\"><img\n  src=\"a.png\"\n  width=\"300\"\n></p>", 1},
+		{"<div align=\"center\">\n  <img src=\"a.png\" alt=\"x\">\n</div>", 1},
+		{"<img src=\"https://example.com/a.png\">", 0},
+		{"text <img src=\"a.png\"> text", 0},
+	}
+	for _, c := range cases {
+		text, blocks := extractBlocks(filepath.Join(dir, "doc.md"), c.src)
+		if len(blocks) != c.want {
+			t.Errorf("%q: %d images, want %d", c.src, len(blocks), c.want)
+		}
+		if c.want > 0 && strings.Contains(text, "src=") {
+			t.Errorf("%q: img tag left in %q", c.src, text)
+		}
+	}
+}
+
 func TestMarkdownKittyPlaceholders(t *testing.T) {
 	dir := t.TempDir()
 	writePNG(t, filepath.Join(dir, "a.png"), 200, 100)
