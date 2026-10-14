@@ -34,10 +34,13 @@ type mdBlock struct {
 }
 
 var (
-	mdImageLine  = regexp.MustCompile(`^\s*!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+["'][^"']*["'])?\s*\)\s*$`)
-	htmlImageTag = regexp.MustCompile(`^\s*(?:<[^>]+>\s*)*<img\s[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>(?:\s*<[^>]+>)*\s*$`)
-	fenceOpen    = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})\\s*([^\\s`]*)")
-	blockToken   = regexp.MustCompile(`^\s*TADORUBLOCK(\d{4})\s*$`)
+	mdImageLine   = regexp.MustCompile(`^\s*!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+["'][^"']*["'])?\s*\)\s*$`)
+	htmlTagsOnly  = regexp.MustCompile(`^\s*(?:<[^>]*>\s*)+$`)
+	htmlImageTag  = regexp.MustCompile(`(?i)<img\b[^>]*>`)
+	htmlImageOpen = regexp.MustCompile(`(?i)<img\b[^>]*$`)
+	htmlSrcAttr   = regexp.MustCompile(`(?i)\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))`)
+	fenceOpen     = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})\\s*([^\\s`]*)")
+	blockToken    = regexp.MustCompile(`^\s*TADORUBLOCK(\d{4})\s*$`)
 )
 
 // extractBlocks swaps standalone local images and mermaid fences for
@@ -66,14 +69,35 @@ func extractBlocks(mdPath, src string) (string, []mdBlock) {
 			i = end
 			continue
 		}
-		if countImages(blocks) < maxMarkdownImages {
-			if img := loadMarkdownImage(mdPath, line); img != nil {
-				blocks = append(blocks, mdBlock{kind: mdImage, img: img})
-				token(line[:len(line)-len(strings.TrimLeft(line, " \t"))])
-				continue
+		end := i
+		if htmlImageOpen.MatchString(line) {
+			// An <img> tag whose attributes span several lines.
+			for end+1 < len(lines) && end-i < 20 {
+				end++
+				if strings.Contains(lines[end], ">") {
+					break
+				}
+			}
+			line = strings.Join(lines[i:end+1], " ")
+		}
+		var imgs []image.Image
+		for _, src := range imageSources(line) {
+			if countImages(blocks)+len(imgs) >= maxMarkdownImages {
+				break
+			}
+			if img := loadMarkdownImage(mdPath, src); img != nil {
+				imgs = append(imgs, img)
 			}
 		}
-		out = append(out, line)
+		if len(imgs) == 0 {
+			out = append(out, lines[i])
+			continue
+		}
+		for _, img := range imgs {
+			blocks = append(blocks, mdBlock{kind: mdImage, img: img})
+			token(line[:len(line)-len(strings.TrimLeft(line, " \t"))])
+		}
+		i = end
 	}
 	return strings.Join(out, "\n"), blocks
 }
@@ -93,17 +117,27 @@ func countImages(blocks []mdBlock) int {
 	return n
 }
 
-// loadMarkdownImage decodes the image a line consists of. Remote images are
-// left to glamour's alt text: previewing a file must not touch the network.
-func loadMarkdownImage(mdPath, line string) image.Image {
-	m := mdImageLine.FindStringSubmatch(line)
-	if m == nil {
-		m = htmlImageTag.FindStringSubmatch(line)
+// imageSources returns the image paths of a line that holds nothing but a
+// markdown image, or nothing but HTML tags with one or more <img> among them.
+func imageSources(line string) []string {
+	if m := mdImageLine.FindStringSubmatch(line); m != nil {
+		return []string{m[1]}
 	}
-	if m == nil {
+	if !htmlTagsOnly.MatchString(line) {
 		return nil
 	}
-	src := m[1]
+	var srcs []string
+	for _, tag := range htmlImageTag.FindAllString(line, -1) {
+		if m := htmlSrcAttr.FindStringSubmatch(tag); m != nil {
+			srcs = append(srcs, m[1]+m[2]+m[3])
+		}
+	}
+	return srcs
+}
+
+// loadMarkdownImage decodes the image at src. Remote images are left to
+// glamour's alt text: previewing a file must not touch the network.
+func loadMarkdownImage(mdPath, src string) image.Image {
 	if strings.Contains(src, "://") || strings.HasPrefix(src, "data:") {
 		return nil
 	}
