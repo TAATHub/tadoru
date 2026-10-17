@@ -14,12 +14,13 @@ import (
 )
 
 const (
-	previewDebounce = 30 * time.Millisecond
-	maxCacheEntries = 128
-	maxCachedImages = 8
-	wheelLines      = 3
-	maxParentWidth  = 60
-	maxCurrentWidth = 90
+	previewDebounce  = 30 * time.Millisecond
+	maxCacheEntries  = 128
+	maxCachedImages  = 8
+	wheelLines       = 3
+	maxParentWidth   = 60
+	maxCurrentWidth  = 90
+	maxSearchEntries = 20000
 )
 
 type previewTickMsg struct {
@@ -61,6 +62,15 @@ type Model struct {
 
 	filter    string
 	searching bool
+	// tree is every entry under cwd, walked in the background from the
+	// first search keystroke and reused until the directory or the hidden
+	// setting changes. treeGen tells batches of an abandoned walk apart.
+	tree          []entry
+	treeTruncated bool
+	treeWalking   bool
+	treeGen       int
+	treeCh        chan treeBatchMsg
+	treeStop      chan struct{}
 
 	sel selection
 
@@ -79,6 +89,8 @@ type Model struct {
 	// mdSource shows Markdown as its source instead of rendered; it sticks
 	// across files so a run of documents can be read the same way.
 	mdSource bool
+
+	showHidden bool
 
 	status string
 }
@@ -104,11 +116,12 @@ func (m *Model) hasParent() bool {
 }
 
 func (m *Model) loadDir(selectName string) {
-	m.allEntries, m.err = readEntries(m.cwd)
-	m.entries = filterEntries(m.allEntries, m.filter)
+	m.allEntries, m.err = readEntries(m.cwd, m.showHidden)
+	m.stopWalk()
+	m.entries = m.filtered()
 	m.parentEntries = nil
 	if m.hasParent() {
-		m.parentEntries, _ = readEntries(filepath.Dir(m.cwd))
+		m.parentEntries, _ = readEntries(filepath.Dir(m.cwd), m.showHidden)
 	}
 	if selectName == "" {
 		selectName = m.lastSelected[m.cwd]
@@ -178,8 +191,70 @@ func (m *Model) moveTo(i int) tea.Cmd {
 	}
 	m.cursor = i
 	m.ensureVisible()
-	m.lastSelected[m.cwd] = m.entries[i].name
+	if e := m.entries[i]; filepath.Dir(e.path) == m.cwd {
+		m.lastSelected[m.cwd] = e.name
+	}
 	return m.requestPreview()
+}
+
+func (m *Model) filtered() []entry {
+	if m.filter == "" {
+		return m.allEntries
+	}
+	return filterEntries(m.tree, m.filter)
+}
+
+func (m *Model) stopWalk() {
+	if m.treeStop != nil {
+		close(m.treeStop)
+	}
+	m.treeGen++
+	m.tree, m.treeTruncated, m.treeWalking = nil, false, false
+	m.treeCh, m.treeStop = nil, nil
+}
+
+// ensureWalk starts collecting the tree once a search needs it.
+func (m *Model) ensureWalk() tea.Cmd {
+	if m.filter == "" || m.treeCh != nil {
+		return nil
+	}
+	m.treeCh, m.treeStop = make(chan treeBatchMsg, 1), make(chan struct{})
+	m.treeWalking = true
+	go walkEntries(m.cwd, m.showHidden, maxSearchEntries, m.treeGen, m.treeCh, m.treeStop)
+	return waitTreeBatch(m.treeCh)
+}
+
+func waitTreeBatch(ch <-chan treeBatchMsg) tea.Cmd {
+	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return msg
+	}
+}
+
+func (m *Model) addTreeBatch(msg treeBatchMsg) tea.Cmd {
+	if msg.gen != m.treeGen {
+		return nil
+	}
+	m.tree = append(m.tree, msg.entries...)
+	m.treeTruncated = msg.truncated
+	m.treeWalking = !msg.done
+	var cmds []tea.Cmd
+	if !msg.done {
+		cmds = append(cmds, waitTreeBatch(m.treeCh))
+	}
+	if m.filter != "" {
+		// New matches are only ever appended, so the cursor stays on the
+		// same entry.
+		hadSel := m.selected() != nil
+		m.entries = m.filtered()
+		if !hadSel && m.selected() != nil {
+			cmds = append(cmds, m.requestPreview())
+		}
+	}
+	return tea.Batch(cmds...)
 }
 
 func filterEntries(entries []entry, q string) []entry {
@@ -202,7 +277,7 @@ func (m *Model) setFilter(q string) tea.Cmd {
 		name = sel.name
 	}
 	m.filter = q
-	m.entries = filterEntries(m.allEntries, q)
+	m.entries = m.filtered()
 	m.cursor, m.offset = 0, 0
 	for i, e := range m.entries {
 		if e.name == name {
@@ -211,7 +286,7 @@ func (m *Model) setFilter(q string) tea.Cmd {
 		}
 	}
 	m.ensureVisible()
-	return m.requestPreview()
+	return tea.Batch(m.ensureWalk(), m.requestPreview())
 }
 
 func (m *Model) changeDir(dir, selectName string) tea.Cmd {
@@ -221,12 +296,37 @@ func (m *Model) changeDir(dir, selectName string) tea.Cmd {
 	return m.requestPreview()
 }
 
+func (m *Model) toggleHidden() tea.Cmd {
+	m.showHidden = !m.showHidden
+	// Cached directory previews were listed under the old setting.
+	m.cache = map[string]*previewContent{}
+	m.cachedImages = nil
+	name := ""
+	if sel := m.selected(); sel != nil {
+		name = sel.name
+	}
+	m.loadDir(name)
+	if m.showHidden {
+		m.status = "Showing hidden files"
+	} else {
+		m.status = "Hiding hidden files"
+	}
+	return tea.Batch(m.ensureWalk(), m.requestPreview())
+}
+
 func (m *Model) enter() tea.Cmd {
 	sel := m.selected()
-	if sel == nil || !sel.isDir {
+	if sel == nil {
 		return nil
 	}
-	return m.changeDir(sel.path, "")
+	if sel.isDir {
+		return m.changeDir(sel.path, "")
+	}
+	// A file found deeper by search opens its directory with it selected.
+	if dir := filepath.Dir(sel.path); dir != m.cwd {
+		return m.changeDir(dir, filepath.Base(sel.path))
+	}
+	return nil
 }
 
 func (m *Model) back() tea.Cmd {
@@ -424,9 +524,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.id != m.reqID {
 			return m, nil
 		}
-		id, path := msg.id, msg.path
+		id, path, hidden := msg.id, msg.path, m.showHidden
 		return m, func() tea.Msg {
-			return previewLoadedMsg{id: id, p: buildPreview(path)}
+			return previewLoadedMsg{id: id, p: buildPreview(path, hidden)}
 		}
 
 	case previewLoadedMsg:
@@ -440,6 +540,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMsg:
 		return m, m.handleMouse(msg)
+
+	case treeBatchMsg:
+		return m, m.addTreeBatch(msg)
 
 	case tea.KeyMsg:
 		m.status = ""
@@ -524,6 +627,8 @@ func (m *Model) handleKey(key string) tea.Cmd {
 			m.sel = selection{}
 			return m.ensureKitty()
 		}
+	case ".":
+		return m.toggleHidden()
 	case "O":
 		if sel := m.selected(); sel != nil {
 			if err := revealInFileManager(sel.path); err != nil {
@@ -640,6 +745,8 @@ func (m *Model) View() string {
 	switch {
 	case m.err != nil:
 		curBody = []string{errStyle.Render(safeText(m.err.Error()))}
+	case len(m.entries) == 0 && m.treeWalking:
+		curBody = []string{dimStyle.Render("(searching…)")}
 	case len(m.entries) == 0 && m.filter != "":
 		curBody = []string{dimStyle.Render("(no match)")}
 	case len(m.entries) == 0:
@@ -655,7 +762,13 @@ func (m *Model) View() string {
 	if m.filter != "" {
 		curTitle += " /" + m.filter
 	}
-	curBox := box(curTitle, curFooter, curBody, l.cw, l.h, true)
+	if m.filter != "" && m.treeWalking {
+		curFooter += " searching…"
+	}
+	if m.filter != "" && m.treeTruncated {
+		curFooter += fmt.Sprintf(" (first %d searched)", maxSearchEntries)
+	}
+	curBox := box(curTitle, strings.TrimSpace(curFooter), curBody, l.cw, l.h, true)
 
 	pvTitle, pvFooter := "", ""
 	var pvBody []string
@@ -709,7 +822,7 @@ func (m *Model) renderFooter() string {
 	case m.status != "":
 		right = safeText(m.status)
 	default:
-		right = "/ search  c copy path  o open  O finder  q quit"
+		right = "/ search  . hidden  c copy path  o open  O finder  q quit"
 		if m.preview != nil && m.preview.kind == pvMarkdown {
 			mode := "source"
 			if m.mdSource {

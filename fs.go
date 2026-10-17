@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+const walkBatchInterval = 50 * time.Millisecond
+
 type entry struct {
 	name    string
 	path    string
@@ -24,7 +26,7 @@ func (e entry) isExec() bool {
 	return !e.isDir && e.mode&0o111 != 0
 }
 
-func readEntries(dir string) ([]entry, error) {
+func readEntries(dir string, showHidden bool) ([]entry, error) {
 	des, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -32,7 +34,7 @@ func readEntries(dir string) ([]entry, error) {
 	entries := make([]entry, 0, len(des))
 	for _, de := range des {
 		name := de.Name()
-		if strings.HasPrefix(name, ".") {
+		if !showHidden && strings.HasPrefix(name, ".") {
 			continue
 		}
 		e := entry{
@@ -120,4 +122,60 @@ func abbrevHome(p string) string {
 		return "~" + p[len(home):]
 	}
 	return p
+}
+
+type treeBatchMsg struct {
+	gen       int
+	entries   []entry
+	done      bool
+	truncated bool
+}
+
+// walkEntries lists everything under root breadth-first, so shallower matches
+// come first, naming each entry by its path relative to root, and sends them
+// to ch in batches until it finishes, reaches limit or stop is closed.
+// Symlinked directories are not descended into to avoid cycles.
+func walkEntries(root string, showHidden bool, limit, gen int, ch chan<- treeBatchMsg, stop <-chan struct{}) {
+	defer close(ch)
+	var batch []entry
+	total := 0
+	last := time.Now()
+	send := func(done, truncated bool) bool {
+		select {
+		case ch <- treeBatchMsg{gen: gen, entries: batch, done: done, truncated: truncated}:
+			batch, last = nil, time.Now()
+			return true
+		case <-stop:
+			return false
+		}
+	}
+	queue := []string{root}
+	for len(queue) > 0 {
+		dir := queue[0]
+		queue = queue[1:]
+		entries, err := readEntries(dir, showHidden)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if total >= limit {
+				send(true, true)
+				return
+			}
+			if rel, err := filepath.Rel(root, e.path); err == nil {
+				e.name = rel
+			}
+			batch = append(batch, e)
+			total++
+			if e.isDir && !e.isLink {
+				queue = append(queue, e.path)
+			}
+		}
+		if len(batch) > 0 && time.Since(last) >= walkBatchInterval {
+			if !send(false, false) {
+				return
+			}
+		}
+	}
+	send(true, false)
 }

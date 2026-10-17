@@ -136,7 +136,7 @@ func numberLines(src []string, w int) []string {
 	return out
 }
 
-func buildPreview(path string) *previewContent {
+func buildPreview(path string, showHidden bool) *previewContent {
 	p := &previewContent{path: path}
 	st, err := os.Stat(path)
 	if err != nil {
@@ -146,7 +146,7 @@ func buildPreview(path string) *previewContent {
 	p.modTime, p.size = st.ModTime(), st.Size()
 
 	if st.IsDir() {
-		p.entries, p.err = readEntries(path)
+		p.entries, p.err = readEntries(path, showHidden)
 		if p.err != nil {
 			p.kind = pvError
 			return p
