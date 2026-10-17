@@ -92,7 +92,7 @@ func TestMarkdownKittyPlaceholders(t *testing.T) {
 	m := newModel(dir)
 	m.width, m.height = 200, 50
 	m.imgMode, m.cellW, m.cellH = imageKitty, 10, 20
-	m.preview = buildPreview(doc)
+	m.preview = buildPreview(doc, false)
 	m.ensureKitty()
 	if len(m.plan) != 1 {
 		t.Fatalf("plan has %d images, want 1", len(m.plan))
@@ -123,7 +123,7 @@ func TestMarkdownSourceToggle(t *testing.T) {
 	}
 	m := newModel(dir)
 	m.width, m.height = 120, 40
-	m.preview = buildPreview(doc)
+	m.preview = buildPreview(doc, false)
 	m.handleKey("r")
 	if got := ansi.Strip(m.previewLines()[0]); got != "1 # Title" {
 		t.Fatalf("source view first line = %q", got)
