@@ -2,6 +2,10 @@
 
 Miller カラム形式でディレクトリを辿り、スクロール可能なプレビューを表示するターミナルファイラー。
 
+![tadoru のデモ](docs/demo.gif)
+
+![tadoru の概要](docs/overview.png)
+
 ## インストール
 
 Go 1.26 以降が必要（古い Go でも GOTOOLCHAIN により自動で取得される）。
