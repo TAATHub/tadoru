@@ -18,7 +18,7 @@ cd tadoru
 go install .
 ```
 
-バイナリは `$(go env GOPATH)/bin`（通常 `~/go/bin`）に入るので、PATH に含めておく。更新も同じコマンドで行う。
+バイナリは `$(go env GOPATH)/bin`（通常 `~/go/bin`）に入るので、PATH に含めておく。更新も同じコマンドで行う（clone した場合は `git pull` してから `go install .`）。
 
 ```sh
 tadoru [-theme NAME] [dir]
