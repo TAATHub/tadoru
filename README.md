@@ -2,6 +2,10 @@
 
 Miller カラム形式でディレクトリを辿り、スクロール可能なプレビューを表示するターミナルファイラー。
 
+<p align="center">
+  <img src="docs/demo.gif" alt="tadoru のデモ" width="800">
+</p>
+
 ## インストール
 
 Go 1.26 以降が必要（古い Go でも GOTOOLCHAIN により自動で取得される）。
@@ -23,6 +27,10 @@ go install .
 ```sh
 tadoru [-theme NAME] [dir]
 ```
+
+## 概要
+
+![tadoru の概要](docs/overview.png)
 
 ## キー操作
 
