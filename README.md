@@ -2,9 +2,9 @@
 
 Miller カラム形式でディレクトリを辿り、スクロール可能なプレビューを表示するターミナルファイラー。
 
-![tadoru のデモ](docs/demo.gif)
-
-![tadoru の概要](docs/overview.png)
+<p align="center">
+  <img src="docs/demo.gif" alt="tadoru のデモ" width="800">
+</p>
 
 ## インストール
 
@@ -19,6 +19,10 @@ go install github.com/TAATHub/tadoru@latest
 ```sh
 tadoru [-theme NAME] [dir]
 ```
+
+## 概要
+
+![tadoru の概要](docs/overview.png)
 
 ## キー操作
 
