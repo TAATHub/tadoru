@@ -4,11 +4,10 @@ Miller カラム形式でディレクトリを辿り、スクロール可能な�
 
 ## インストール
 
-Go 1.26 以降が必要（古い Go でも GOTOOLCHAIN により自動で取得される）。リポジトリは private なので、git が GitHub に認証できる状態にしておく。
+Go 1.26 以降が必要（古い Go でも GOTOOLCHAIN により自動で取得される）。
 
 ```sh
-gh auth setup-git
-GOPRIVATE=github.com/TAATHub go install github.com/TAATHub/tadoru@latest
+go install github.com/TAATHub/tadoru@latest
 ```
 
 バイナリは `$(go env GOPATH)/bin`（通常 `~/go/bin`）に入るので、PATH に含めておく。更新も同じコマンドで行う。
@@ -49,3 +48,7 @@ tadoru [-theme NAME] [dir]
 `-theme NAME` か `TADORU_THEME` で指定する。UI の配色・コードのハイライト・Markdown の配色がまとめて切り替わる。未指定なら Ghostty の `theme` 設定に合わせ、該当がなければ `catppuccin-mocha`。
 
 `catppuccin-mocha` / `dracula` / `gruvbox` / `monokai` / `nord` / `onedark` / `solarized-dark` / `tokyonight`（`Catppuccin Mocha` のような表記揺れも可）
+
+## ライセンス
+
+[MIT](LICENSE)
