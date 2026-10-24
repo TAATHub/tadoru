@@ -573,8 +573,13 @@ func (m *Model) handleSearchKey(msg tea.KeyMsg) tea.Cmd {
 		m.searching = false
 		return m.setFilter("")
 	case tea.KeyEnter:
-		m.searching = false
-		return nil
+		// Leave search at the selected result's own directory.
+		sel := m.selected()
+		if sel == nil {
+			m.searching = false
+			return nil
+		}
+		return m.changeDir(filepath.Dir(sel.path), filepath.Base(sel.path))
 	case tea.KeyBackspace:
 		r := []rune(m.filter)
 		if len(r) == 0 {
