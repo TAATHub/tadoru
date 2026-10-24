@@ -10,6 +10,14 @@ Go 1.26 以降が必要（古い Go でも GOTOOLCHAIN により自動で取得�
 go install github.com/TAATHub/tadoru@latest
 ```
 
+ソースからビルドする場合は clone したディレクトリで `go install .` を実行する。
+
+```sh
+git clone https://github.com/TAATHub/tadoru.git
+cd tadoru
+go install .
+```
+
 バイナリは `$(go env GOPATH)/bin`（通常 `~/go/bin`）に入るので、PATH に含めておく。更新も同じコマンドで行う。
 
 ```sh
